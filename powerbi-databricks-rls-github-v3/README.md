@@ -1,55 +1,23 @@
-# Power BI + Databricks Dynamic RLS GitOps - V3
+# Power BI + Databricks Dynamic RLS - V4
 
-V3 is an end-to-end reference implementation for managing a Databricks-backed Power BI
-semantic model and report using GitHub.
-
-It covers:
-
-- Databricks Delta entitlement tables.
-- Dynamic Power BI row-level security (RLS) using `USERPRINCIPALNAME()`.
-- Microsoft Entra security-group membership serialized into the TMDL role.
-- TMDL semantic-model source control.
-- PBIR report source control and deployment.
-- DEV / TEST / PROD configuration.
-- GitHub OIDC authentication to Microsoft Entra ID.
-- Fabric workspace access reconciliation.
-- Semantic-model create/update.
-- Fabric connection binding.
-- Dataset refresh.
-- Automated RLS positive/negative validation.
-- Report rebind and create/update.
-- Pull-request governance with CODEOWNERS.
-
-## Runtime authorization
+V4 intentionally focuses on the actual RLS requirement.
 
 ```text
-User signs in
-    |
+Logged-in Power BI user
+        |
 USERPRINCIPALNAME()
-    |
-DynamicUserSecurity role
-    |
-UserAccess[user_upn] filter
-    |
-UserAccess[region_key] -> Sales[region_key]
-    |
-Only authorized rows
+        |
+Power BI Dynamic RLS
+        |
+Databricks UserAccess entitlement
+        |
+Authorized rows
 ```
 
-## GitOps deployment
+## V4 simplification
 
-```text
-Developer -> PR -> validation -> approval -> GitHub Actions
-                                        |
-                                        +-> OIDC -> Entra
-                                        +-> Workspace access
-                                        +-> Render RLS role + group members
-                                        +-> Deploy TMDL
-                                        +-> Bind Fabric connection
-                                        +-> Refresh
-                                        +-> RLS tests
-                                        +-> Rebind PBIR
-                                        +-> Deploy report
-```
+Removed from the core solution: Entra group as a data-entitlement step, group membership embedded in TMDL, PBIR deployment, Fabric Connection lifecycle, and report deployment.
 
-Start with `docs/00-start-here.md`.
+The report can remain a normal **PBIX**. An Entra security group is optional for report/app access or for assigning many consumers to the RLS role in Power BI Service. **Databricks remains the source of user-to-data entitlement.**
+
+TMDL/GitHub CI/CD remains only as optional industrialization for the semantic model and RLS definition.

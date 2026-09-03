@@ -1,7 +1,4 @@
-# Security-sensitive assets require explicit review.
-semantic-model/definition/roles/       @security-team @powerbi-team
-templates/DynamicUserSecurity.tmdl.tpl @security-team @powerbi-team
-config/environments/                   @platform-team @security-team
-.github/workflows/                     @platform-team
-report/                                @powerbi-team
-databricks/                            @data-platform-team
+semantic-model/definition/roles/ @security-team @powerbi-team
+config/environments/ @powerbi-team
+.github/workflows/ @platform-team
+databricks/ @data-platform-team

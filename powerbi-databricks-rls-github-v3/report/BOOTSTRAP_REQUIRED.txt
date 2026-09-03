@@ -1,5 +1,0 @@
-Replace the skeletal report definition with the complete PBIR definition exported
-from your actual Power BI/Fabric report before first real deployment.
-
-Run:
-  python scripts/export_report.py --environment dev --report-id <GUID>
