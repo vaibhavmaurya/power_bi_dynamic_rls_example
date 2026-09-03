@@ -1,0 +1,97 @@
+name: Deploy Power BI / Fabric V3
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "semantic-model/**"
+      - "report/**"
+      - "templates/**"
+      - "config/**"
+      - "scripts/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [dev, test, prod]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: powerbi-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve environment
+        id: env
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "name=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate source/config
+        run: python scripts/validate_repo.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Azure login using GitHub OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Acquire API tokens
+        shell: bash
+        run: |
+          FABRIC_TOKEN="$(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv)"
+          POWERBI_TOKEN="$(az account get-access-token --resource https://analysis.windows.net/powerbi/api --query accessToken -o tsv)"
+          echo "::add-mask::$FABRIC_TOKEN"
+          echo "::add-mask::$POWERBI_TOKEN"
+          echo "FABRIC_TOKEN=$FABRIC_TOKEN" >> "$GITHUB_ENV"
+          echo "POWERBI_TOKEN=$POWERBI_TOKEN" >> "$GITHUB_ENV"
+
+      - name: Reconcile workspace access
+        run: python scripts/manage_workspace_access.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Render environment-specific RLS role and group membership
+        run: python scripts/render_rls_role.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Deploy semantic model
+        run: python scripts/deploy_semantic_model.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Bind Fabric connection
+        run: python scripts/bind_connection.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Refresh semantic model
+        run: python scripts/refresh_semantic_model.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Run RLS security tests
+        if: ${{ steps.env.outputs.name != 'prod' }}
+        run: python scripts/test_rls.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Render/rebind PBIR report
+        run: python scripts/render_report.py --environment "${{ steps.env.outputs.name }}"
+
+      - name: Deploy PBIR report
+        run: python scripts/deploy_report.py --environment "${{ steps.env.outputs.name }}"

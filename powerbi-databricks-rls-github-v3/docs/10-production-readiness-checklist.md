@@ -1,0 +1,21 @@
+# Production Readiness Checklist
+
+- [ ] Real semantic model exported as TMDL.
+- [ ] Real report exported as PBIR.
+- [ ] `UserAccess` table source is governed.
+- [ ] Active relationship propagates security correctly.
+- [ ] Entra consumer group is configured as role member.
+- [ ] Report consumers are Viewer/app consumers, not broad workspace authors.
+- [ ] GitHub OIDC configured.
+- [ ] Deployment service principal tenant settings approved.
+- [ ] DEV/TEST/PROD workspace IDs configured.
+- [ ] Fabric connection IDs/details configured.
+- [ ] No secrets committed.
+- [ ] RLS test cases include negative assertions.
+- [ ] PR CODEOWNERS enforced.
+- [ ] TEST and PROD GitHub Environments have reviewers.
+- [ ] Refresh succeeds after deployment.
+- [ ] PBIR report rebind is validated.
+- [ ] Rollback procedure tested.
+- [ ] Databricks entitlement change audit exists.
+- [ ] Break-glass/admin access is documented.

@@ -1,0 +1,19 @@
+{
+  "connectivityType": "ShareableCloud",
+  "displayName": "PowerBI-Databricks-Connection",
+  "connectionDetails": {
+    "type": "<resolve-from-List-Supported-Connection-Types>",
+    "creationMethod": "<resolve-from-supported-type>",
+    "parameters": []
+  },
+  "privacyLevel": "Organizational",
+  "credentialDetails": {
+    "credentialType": "<supported-auth-type>",
+    "credentials": {
+      "clientId": "${ENV:DATABRICKS_CLIENT_ID}",
+      "clientSecret": "${ENV:DATABRICKS_CLIENT_SECRET}"
+    },
+    "singleSignOnType": "None",
+    "connectionEncryption": "NotEncrypted"
+  }
+}

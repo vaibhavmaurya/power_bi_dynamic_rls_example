@@ -1,0 +1,8 @@
+Replace the placeholder semantic-model definition with the complete TMDL definition
+exported from your actual Power BI/Fabric semantic model before deployment.
+
+Run:
+  python scripts/export_semantic_model.py --environment dev --semantic-model-id <GUID>
+
+The export script writes the complete public definition including definition.pbism,
+definition/database.tmdl, definition/model.tmdl, tables, relationships, roles, etc.
