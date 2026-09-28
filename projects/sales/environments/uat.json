@@ -1,0 +1,5 @@
+{
+  "environment": "UAT",
+  "workspaceId": "<UAT-WORKSPACE-ID>",
+  "semanticModelId": "<UAT-SEMANTIC-MODEL-ID>"
+}

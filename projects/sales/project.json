@@ -1,0 +1,5 @@
+{
+  "projectKey": "sales",
+  "roleSourcePath": "projects/sales/roles/",
+  "roleDefinitionPathPrefix": "definition/roles/"
+}

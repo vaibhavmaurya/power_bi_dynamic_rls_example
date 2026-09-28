@@ -1,0 +1,45 @@
+name: RLS / DEV Deployment
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: sales-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: RLS / DEV Deployment
+    runs-on: ubuntu-latest
+    environment: DEV
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Deploy RLS roles to DEV
+        env:
+          FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+        run: |
+          python -m src.main \
+            --project projects/sales/project.json \
+            --environment projects/sales/environments/dev.json \
+            --base-ref origin/${{ github.base_ref }} \
+            --check-name "RLS / DEV Deployment"

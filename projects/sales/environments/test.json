@@ -1,0 +1,5 @@
+{
+  "environment": "TEST",
+  "workspaceId": "<TEST-WORKSPACE-ID>",
+  "semanticModelId": "<TEST-SEMANTIC-MODEL-ID>"
+}

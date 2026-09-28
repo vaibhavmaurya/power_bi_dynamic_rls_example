@@ -1,0 +1,90 @@
+name: RLS Promotion
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-test:
+    name: RLS / TEST Deployment
+    runs-on: ubuntu-latest
+    environment: TEST
+    concurrency:
+      group: sales-test
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Deploy RLS roles to TEST
+        env:
+          FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+        run: |
+          python -m src.main \
+            --project projects/sales/project.json \
+            --environment projects/sales/environments/test.json \
+            --base-ref HEAD~1 \
+            --check-name "RLS / TEST Deployment"
+
+  deploy-uat:
+    name: RLS / UAT Deployment
+    runs-on: ubuntu-latest
+    needs: deploy-test
+    environment: UAT
+    concurrency:
+      group: sales-uat
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Deploy RLS roles to UAT
+        env:
+          FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+        run: |
+          python -m src.main \
+            --project projects/sales/project.json \
+            --environment projects/sales/environments/uat.json \
+            --base-ref HEAD~1 \
+            --check-name "RLS / UAT Deployment"
+
+  deploy-prod:
+    name: RLS / PROD Deployment
+    runs-on: ubuntu-latest
+    needs: deploy-uat
+    environment: PROD
+    concurrency:
+      group: sales-prod
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Deploy RLS roles to PROD
+        env:
+          FABRIC_TENANT_ID: ${{ secrets.FABRIC_TENANT_ID }}
+          FABRIC_CLIENT_ID: ${{ secrets.FABRIC_CLIENT_ID }}
+          FABRIC_CLIENT_SECRET: ${{ secrets.FABRIC_CLIENT_SECRET }}
+        run: |
+          python -m src.main \
+            --project projects/sales/project.json \
+            --environment projects/sales/environments/prod.json \
+            --base-ref HEAD~1 \
+            --check-name "RLS / PROD Deployment"

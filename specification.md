@@ -1,52 +1,225 @@
-# Fabric API Based Centralized Power BI RLS Governance
-## Technical Specification for POC
+# Centralized Power BI RLS Governance Using Microsoft Fabric REST APIs
 
-## 1. Objective
+## 1. Purpose
 
-Build a centralized application and CI/CD process for managing **Power BI / Microsoft Fabric Semantic Model Row-Level Security (RLS) definitions only**.
+This solution provides centralized governance, version control, validation, deployment, and promotion of **Power BI / Microsoft Fabric Semantic Model Row-Level Security (RLS) definitions**.
 
-The solution will:
+The scope is intentionally restricted to RLS. Report development, visual development, measures, tables, relationships, Power Query, semantic-model design, and other report-development activities remain outside this solution.
 
-1. Store individual RLS role definitions as TMDL files in GitHub.
-2. Allow developers to add or modify RLS roles through feature branches and pull requests.
-3. Automatically deploy proposed RLS changes to DEV when a pull request is created or updated.
-4. Validate the deployment and show PASS/FAIL in the GitHub pull request.
-5. Promote the same approved RLS definitions to TEST, UAT and PROD after environment-specific approvals.
-6. Use Microsoft Fabric REST APIs for all semantic-model retrieval and updates.
-7. Authenticate to Fabric using Microsoft Entra ID OAuth 2.0.
-8. Use a Service Principal as the primary CI/CD authentication mechanism.
-9. Optionally support interactive user authentication for local testing or administrative troubleshooting.
-10. Preserve all non-RLS semantic-model definition components.
+The solution uses:
+
+```text
+GitHub
+GitHub Actions
+Microsoft Fabric REST APIs
+Microsoft Entra ID OAuth 2.0
+MSAL Python
+TMDL RLS definitions
+```
+
+The primary deployment identity is a **Microsoft Entra Service Principal**.
+
+Interactive user authentication is supported as an optional mechanism for local testing and troubleshooting.
 
 ---
 
-# 2. Environment Configuration
+# 2. Core Architectural Principles
 
-Every environment has its own Fabric workspace and semantic model.
+The architecture follows these principles.
 
-Therefore the following values must be maintained as environment-specific configuration:
+| Principle | Design |
+|---|---|
+| RLS source of truth | GitHub |
+| Full semantic model source of truth | Microsoft Fabric |
+| Deployment mechanism | Microsoft Fabric REST APIs |
+| Authentication | Microsoft Entra OAuth 2.0 |
+| CI/CD authentication | Service Principal using MSAL |
+| DEV deployment | Automatically on Pull Request |
+| Higher environments | GitHub Environment approval gates |
+| RLS update | Replace existing role or append new role |
+| Semantic-model protection | Retrieve complete live definition before updating |
+| Promotion model | Same approved Git commit promoted unchanged |
+| Environment differences | Workspace ID and Semantic Model ID only |
+| RLS deletion | Out of scope for initial POC |
+
+A critical Fabric behavior drives the design:
+
+> `updateDefinition` overrides the semantic-model definition supplied to it.
+
+Therefore the application must **never send only the changed RLS file**.
+
+Instead:
+
+```text
+Get complete Fabric semantic model definition
+                    ↓
+Overlay changed RLS definition(s)
+                    ↓
+Preserve every other definition part
+                    ↓
+Send complete updated definition
+                    ↓
+Re-read definition
+                    ↓
+Verify deployed RLS
+```
+
+Microsoft documents `Update Semantic Model Definition` as overriding the definition for the specified semantic model.
+
+---
+
+# 3. High-Level Architecture
+
+```text
+                    ┌─────────────────────────┐
+                    │ Visualization / RLS Team│
+                    └────────────┬────────────┘
+                                 │
+                         Create Feature Branch
+                                 │
+                         Add / Update RLS TMDL
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │      GitHub Repo        │
+                    └────────────┬────────────┘
+                                 │
+                           Pull Request
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │     GitHub Actions      │
+                    │   PR → DEV Workflow     │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │ MSAL Authentication     │
+                    │ Service Principal       │
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │ Fabric REST APIs        │
+                    │                         │
+                    │ Get Semantic Model      │
+                    │ Get Definition          │
+                    │ LRO APIs                │
+                    │ Update Definition       │
+                    └────────────┬────────────┘
+                                 │
+                          DEV Validation
+                                 │
+                                 ▼
+                       GitHub PR PASS / FAIL
+                                 │
+                         Review + PR Merge
+                                 │
+                                 ▼
+                  TEST → UAT → PROD Promotion
+                    with approval at each gate
+```
+
+---
+
+# 4. Repository Structure
+
+Recommended POC structure:
+
+```text
+powerbi-rls-governance/
+│
+├── projects/
+│   ├── sales/
+│   │   ├── project.json
+│   │   │
+│   │   ├── roles/
+│   │   │   ├── abc.tmdl
+│   │   │   ├── FinanceRestricted.tmdl
+│   │   │   └── DynamicBusinessAccess.tmdl
+│   │   │
+│   │   └── environments/
+│   │       ├── dev.json
+│   │       ├── test.json
+│   │       ├── uat.json
+│   │       └── prod.json
+│   │
+│   └── another-project/
+│
+├── src/
+│   ├── authentication.py
+│   ├── fabric_client.py
+│   ├── lro.py
+│   ├── change_detection.py
+│   ├── role_overlay.py
+│   ├── deploy.py
+│   └── verify.py
+│
+├── tests/
+│   ├── test_authentication.py
+│   ├── test_lro.py
+│   ├── test_role_overlay.py
+│   ├── test_change_detection.py
+│   └── test_deployment.py
+│
+├── docs/
+│   ├── architecture.md
+│   ├── fabric-api-reference.md
+│   ├── authentication.md
+│   └── github-cicd.md
+│
+└── .github/
+    ├── CODEOWNERS
+    └── workflows/
+        ├── pr-dev.yml
+        └── promote.yml
+```
+
+---
+
+# 5. Project Configuration
+
+Example:
+
+```json
+{
+  "projectKey": "sales",
+  "roleSourcePath": "projects/sales/roles/",
+  "roleDefinitionPathPrefix": "definition/roles/"
+}
+```
+
+The TMDL role path prefix must be configurable.
+
+The default is:
+
+```text
+definition/roles/
+```
+
+Therefore:
+
+```text
+abc.tmdl
+```
+
+maps to:
+
+```text
+definition/roles/abc.tmdl
+```
+
+The implementation must ultimately compare against the exact `path` returned by Fabric's `getDefinition`.
+
+---
+
+# 6. Environment Configuration
+
+Each environment maintains its own:
 
 ```text
 workspaceId
 semanticModelId
-```
-
-Recommended structure:
-
-```text
-projects/
-└── sales/
-    ├── project.json
-    ├── roles/
-    │   ├── abc.tmdl
-    │   ├── FinanceRestricted.tmdl
-    │   └── DynamicBusinessAccess.tmdl
-    │
-    └── environments/
-        ├── dev.json
-        ├── test.json
-        ├── uat.json
-        └── prod.json
 ```
 
 Example `dev.json`:
@@ -69,94 +242,39 @@ Example `test.json`:
 }
 ```
 
-Equivalent configuration exists for UAT and PROD.
+The same approach applies to UAT and PROD.
 
-Therefore:
+Conceptually:
 
 ```text
-                        Git
-                         |
-                 Same abc.tmdl
-                         |
-          +--------------+--------------+
-          |              |              |
-         DEV            TEST           UAT            PROD
-          |              |              |              |
- Workspace A       Workspace B     Workspace C     Workspace D
- Semantic A        Semantic B      Semantic C      Semantic D
+                    Same Approved Git RLS
+
+                           abc.tmdl
+                               │
+             ┌─────────────────┼─────────────────┐
+             │                 │                 │
+            DEV               TEST              UAT              PROD
+             │                 │                 │                 │
+      Workspace DEV      Workspace TEST     Workspace UAT     Workspace PROD
+      Semantic DEV       Semantic TEST      Semantic UAT      Semantic PROD
 ```
 
-The **RLS TMDL does not change between environments**.
-
-Only deployment target configuration changes.
-
-This implements the principle:
-
-> Build/approve once, promote the same RLS artifact across environments.
+The role definition itself must not be rebuilt or changed between environments.
 
 ---
 
-# 3. Common Project Configuration
+# 7. Authentication Design
 
-Example `project.json`:
+## 7.1 Primary Authentication
 
-```json
-{
-  "projectKey": "sales",
-  "roleSourcePath": "projects/sales/roles/",
-  "roleDefinitionPathPrefix": "definition/roles/"
-}
-```
-
-The role path prefix should be configurable rather than hard-coded.
-
-Default:
+The primary CI/CD authentication mechanism is:
 
 ```text
-definition/roles/
-```
-
-Therefore:
-
-```text
-abc.tmdl
-```
-
-maps to:
-
-```text
-definition/roles/abc.tmdl
-```
-
----
-
-# 4. Authentication Architecture
-
-The application supports two authentication modes.
-
-```text
-AuthenticationProvider
-        |
-        +-------------------------------+
-        |                               |
-Service Principal                 User Authentication
-Primary CI/CD mode                Optional interactive mode
-        |                               |
-OAuth Client Credentials          OAuth Delegated Flow
-        |                               |
-MSAL ConfidentialClient           MSAL PublicClient
-```
-
----
-
-# 5. Authentication Mode 1 — Service Principal
-
-## Recommended for GitHub Actions and automated deployments
-
-Authentication protocol:
-
-```text
-OAuth 2.0 Client Credentials Grant
+OAuth 2.0 Client Credentials
+        +
+Microsoft Entra Service Principal
+        +
+MSAL Python
 ```
 
 Python library:
@@ -165,22 +283,10 @@ Python library:
 msal
 ```
 
-The MSAL application type must be:
+MSAL class:
 
 ```python
 msal.ConfidentialClientApplication
-```
-
-Microsoft documents `acquire_token_for_client()` as the MSAL Python method for acquiring an application token using client credentials.
-
----
-
-## 5.1 Required Configuration
-
-```text
-tenantId
-clientId
-clientSecret
 ```
 
 Authority:
@@ -189,32 +295,23 @@ Authority:
 https://login.microsoftonline.com/<tenantId>
 ```
 
-For example:
-
-```python
-AUTHORITY = f"https://login.microsoftonline.com/{tenant_id}"
-```
-
-MSAL supports tenant-specific authorities in this format.
-
-Fabric scope:
-
-```python
-SCOPES = [
-    "https://api.fabric.microsoft.com/.default"
-]
-```
-
-Microsoft documents the Fabric resource scope for client-credential token acquisition as:
+Scope:
 
 ```text
 https://api.fabric.microsoft.com/.default
 ```
 
+Token method:
+
+```python
+acquire_token_for_client()
+```
+
+MSAL documents `acquire_token_for_client()` as the method for obtaining an access token as the application itself using client credentials.
 
 ---
 
-# 6. Service Principal MSAL Implementation
+# 8. Service Principal Authentication Implementation
 
 Recommended implementation:
 
@@ -222,7 +319,7 @@ Recommended implementation:
 import msal
 
 
-class FabricServicePrincipalAuthenticator:
+class ServicePrincipalTokenProvider:
 
     def __init__(
         self,
@@ -252,244 +349,25 @@ class FabricServicePrincipalAuthenticator:
 
         if "access_token" not in result:
             raise RuntimeError(
-                "Fabric authentication failed: "
+                "Authentication failed: "
                 + result.get(
                     "error_description",
-                    result.get("error", "Unknown authentication error")
+                    result.get("error", "Unknown error")
                 )
             )
 
         return result["access_token"]
 ```
 
-MSAL automatically uses its token cache when `acquire_token_for_client()` is called, avoiding an unnecessary token request when a suitable cached token exists.
+MSAL also uses its token cache when `acquire_token_for_client()` is invoked and requests another token only when necessary.
 
 ---
 
-# 7. Fabric API Authorization Header
+# 9. Authentication Configuration
 
-Every Fabric REST call uses:
+Authentication secrets must not be stored in project or environment JSON files.
 
-```http
-Authorization: Bearer <access-token>
-```
-
-Example Python:
-
-```python
-headers = {
-    "Authorization": f"Bearer {access_token}",
-    "Content-Type": "application/json"
-}
-```
-
-The Fabric API base URL is:
-
-```text
-https://api.fabric.microsoft.com
-```
-
----
-
-# 8. Important Service Principal Permission Model
-
-There are two separate controls.
-
-## Microsoft Entra authentication
-
-This answers:
-
-```text
-Who is this application?
-```
-
-Handled through:
-
-```text
-Tenant ID
-Client ID
-Client credential
-OAuth token
-```
-
-## Fabric authorization
-
-This answers:
-
-```text
-What is this application allowed to modify?
-```
-
-The service principal must be authorized in Fabric.
-
-Fabric also requires the tenant setting that allows service principals to use Fabric APIs to be enabled.
-
-Therefore:
-
-```text
-Service Principal
-       |
-       +--> Microsoft Entra authentication
-       |
-       +--> Fabric tenant setting permits SP API access
-       |
-       +--> Fabric workspace/item permissions
-       |
-       v
-Semantic Model API
-```
-
----
-
-# 9. Important Scope Clarification
-
-For a **Service Principal**, use:
-
-```python
-["https://api.fabric.microsoft.com/.default"]
-```
-
-Do not treat:
-
-```text
-SemanticModel.ReadWrite.All
-```
-
-as the service principal runtime scope.
-
-Microsoft explicitly states that Fabric REST delegated scopes apply to **user delegated access**. Direct service-principal and managed-identity authorization is governed by Fabric admin controls and artifact permissions.
-
-Therefore:
-
-```text
-Service Principal
-    ↓
-https://api.fabric.microsoft.com/.default
-```
-
-while:
-
-```text
-Interactive User
-    ↓
-SemanticModel.ReadWrite.All
-```
-
-is the appropriate conceptual separation.
-
----
-
-# 10. Required Fabric Permissions
-
-The APIs used by this application require the following effective access.
-
-### Get Semantic Model
-
-Requires read permission.
-
-The API supports:
-
-```text
-User
-Service Principal
-Managed Identity
-```
-
-
-### Get Semantic Model Definition
-
-Requires:
-
-```text
-Read + Write
-```
-
-permission on the semantic model.
-
-The API supports both users and service principals.
-
-### Update Semantic Model Definition
-
-Requires:
-
-```text
-Read + Write
-```
-
-permission on the semantic model.
-
-The API also supports both users and service principals.
-
-Therefore the deployment identity must ultimately have:
-
-```text
-READ + WRITE
-```
-
-access to the target semantic model.
-
----
-
-# 11. Recommended Service Principal Configuration by Environment
-
-For the POC, one Service Principal can be used:
-
-```text
-RLS-CICD-ServicePrincipal
-```
-
-with access to:
-
-```text
-DEV
-TEST
-UAT
-PROD
-```
-
-However, production architecture should preferably isolate identities:
-
-```text
-rls-deployer-dev
-rls-deployer-test
-rls-deployer-uat
-rls-deployer-prod
-```
-
-Then:
-
-```text
-DEV identity
-    → DEV workspace only
-
-TEST identity
-    → TEST workspace only
-
-UAT identity
-    → UAT workspace only
-
-PROD identity
-    → PROD workspace only
-```
-
-This provides stronger blast-radius isolation.
-
----
-
-# 12. Secret Management
-
-Do not store the client secret in:
-
-```text
-project.json
-environment JSON
-source code
-Git repository
-```
-
-For GitHub Actions use encrypted GitHub environment secrets.
-
-Example:
+Use environment variables or GitHub secrets:
 
 ```text
 FABRIC_TENANT_ID
@@ -497,44 +375,38 @@ FABRIC_CLIENT_ID
 FABRIC_CLIENT_SECRET
 ```
 
-These can also be environment-specific:
+The separation is:
 
 ```text
-DEV:
-FABRIC_CLIENT_ID
-FABRIC_CLIENT_SECRET
+Environment deployment configuration
+------------------------------------
+workspaceId
+semanticModelId
 
-TEST:
-FABRIC_CLIENT_ID
-FABRIC_CLIENT_SECRET
 
-UAT:
-FABRIC_CLIENT_ID
-FABRIC_CLIENT_SECRET
-
-PROD:
-FABRIC_CLIENT_ID
-FABRIC_CLIENT_SECRET
+Authentication configuration
+----------------------------
+tenantId
+clientId
+clientSecret
 ```
 
-GitHub environment secrets are particularly useful because protected environment secrets are not exposed to the workflow until that environment's approval requirements have been satisfied.
-
-For a production implementation, certificate credentials or workload federation can later replace client secrets without changing the Fabric client abstraction.
+These concerns must remain independent.
 
 ---
 
-# 13. Optional Authentication Mode 2 — User Authentication
+# 10. Optional User Authentication
 
-User authentication should be supported primarily for:
+Interactive user authentication is optional and intended for:
 
 ```text
 Local development
-Troubleshooting
-Testing Fabric API access
-Administrative/manual execution
+API troubleshooting
+Administrative testing
+Developer validation
 ```
 
-It should NOT be the standard CI/CD authentication mechanism.
+It must not be the default GitHub CI/CD authentication method.
 
 Use:
 
@@ -542,17 +414,13 @@ Use:
 msal.PublicClientApplication
 ```
 
-Microsoft Fabric supports user identities for all three Semantic Model APIs used by this solution.
+Recommended delegated scope:
 
----
-
-# 14. Interactive User Authentication
-
-For desktop/local development, use:
-
-```python
-acquire_token_interactive()
+```text
+https://api.fabric.microsoft.com/SemanticModel.ReadWrite.All
 ```
+
+Fabric documents `SemanticModel.ReadWrite.All` or `Item.ReadWrite.All` as valid delegated scopes for Get Definition and Update Definition.
 
 Example:
 
@@ -560,13 +428,9 @@ Example:
 import msal
 
 
-class FabricInteractiveAuthenticator:
+class InteractiveUserTokenProvider:
 
-    def __init__(
-        self,
-        tenant_id: str,
-        client_id: str
-    ):
+    def __init__(self, tenant_id, client_id):
 
         authority = (
             f"https://login.microsoftonline.com/{tenant_id}"
@@ -582,7 +446,7 @@ class FabricInteractiveAuthenticator:
             "SemanticModel.ReadWrite.All"
         ]
 
-    def get_access_token(self) -> str:
+    def get_access_token(self):
 
         accounts = self.app.get_accounts()
 
@@ -603,97 +467,20 @@ class FabricInteractiveAuthenticator:
             raise RuntimeError(
                 result.get(
                     "error_description",
-                    "Interactive authentication failed"
+                    "Authentication failed"
                 )
             )
 
         return result["access_token"]
 ```
 
-Microsoft recommends `acquire_token_interactive()` for interactive public-client scenarios; it opens the browser and supports PKCE. The app registration should include the desktop redirect URI:
-
-```text
-http://localhost
-```
-
-
 ---
 
-# 15. Delegated User Scope
+# 11. Authentication Abstraction
 
-For this application the most specific delegated permission is:
+Fabric API code must not directly depend on a particular MSAL authentication mechanism.
 
-```text
-SemanticModel.ReadWrite.All
-```
-
-because both Get Definition and Update Definition require it.
-
-The fully qualified MSAL scope is:
-
-```text
-https://api.fabric.microsoft.com/SemanticModel.ReadWrite.All
-```
-
-A broader alternative is:
-
-```text
-https://api.fabric.microsoft.com/Item.ReadWrite.All
-```
-
-Fabric documents both as valid delegated permissions for these semantic-model APIs.
-
-For least privilege, prefer:
-
-```text
-SemanticModel.ReadWrite.All
-```
-
-for interactive users.
-
----
-
-# 16. Optional Device Code Authentication
-
-For command-line environments where opening a browser locally is impractical, optionally support MSAL device-code flow:
-
-```python
-app = msal.PublicClientApplication(
-    client_id,
-    authority=authority
-)
-
-flow = app.initiate_device_flow(
-    scopes=scopes
-)
-
-print(flow["message"])
-
-result = app.acquire_token_by_device_flow(flow)
-```
-
-MSAL documents device-code flow for public clients/headless applications.
-
-Thus user authentication modes can be:
-
-```text
-USER_INTERACTIVE
-USER_DEVICE_CODE
-```
-
-while CI/CD uses:
-
-```text
-SERVICE_PRINCIPAL
-```
-
----
-
-# 17. Authentication Abstraction
-
-Do not couple the Fabric API client directly to MSAL implementation details.
-
-Recommended interface:
+Recommended abstraction:
 
 ```python
 from abc import ABC, abstractmethod
@@ -711,7 +498,7 @@ Implementations:
 ```text
 ServicePrincipalTokenProvider
 InteractiveUserTokenProvider
-DeviceCodeTokenProvider
+DeviceCodeTokenProvider        optional
 ```
 
 Then:
@@ -723,58 +510,86 @@ class FabricClient:
         self.token_provider = token_provider
 ```
 
-This allows authentication methods to change without changing Fabric API logic.
+This makes authentication replaceable without changing Fabric deployment logic.
 
 ---
 
-# 18. Fabric API Sequence
+# 12. Fabric REST API Reference
 
-The RLS deployment engine uses these Fabric APIs.
+Base URL:
 
-## Step 1 — Get Semantic Model
+```text
+https://api.fabric.microsoft.com/v1
+```
+
+The POC uses the following Fabric APIs.
+
+| Purpose | Method | API |
+|---|---|---|
+| Verify semantic model | GET | `/workspaces/{workspaceId}/semanticModels/{semanticModelId}` |
+| Retrieve semantic definition | POST | `/workspaces/{workspaceId}/semanticModels/{semanticModelId}/getDefinition?format=TMDL` |
+| Poll long-running operation | GET | `/operations/{operationId}` |
+| Retrieve LRO result | GET | `/operations/{operationId}/result` |
+| Update semantic definition | POST | `/workspaces/{workspaceId}/semanticModels/{semanticModelId}/updateDefinition` |
+
+These APIs are the approved Fabric API surface for the initial POC.
+
+The implementation must not silently switch to XMLA/TOM.
+
+---
+
+# 13. API 1 — Get Semantic Model
+
+Purpose:
+
+```text
+Validate that the configured:
+
+workspaceId
++
+semanticModelId
+
+identify an existing and accessible semantic model.
+```
+
+Request:
 
 ```http
 GET https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/semanticModels/{semanticModelId}
 ```
 
-Purpose:
+Fabric documents this API as returning the properties of a semantic model and requiring read permission. It supports users, service principals, and managed identities.
+
+Official reference:
 
 ```text
-Verify configured workspaceId + semanticModelId combination
-```
-
-If this request succeeds:
-
-```text
-Target semantic model exists
-Deployment identity can access it
-```
-
-If it fails:
-
-```text
-STOP deployment
+Microsoft Learn
+Fabric REST API
+Semantic Model
+Get Semantic Model
+API Version: v1
 ```
 
 ---
 
-# 19. Get Semantic Model Definition
+# 14. API 2 — Get Semantic Model Definition
+
+Purpose:
+
+```text
+Retrieve the complete live semantic-model definition
+before applying an RLS modification.
+```
+
+Request:
 
 ```http
 POST https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/semanticModels/{semanticModelId}/getDefinition?format=TMDL
 ```
 
-This returns the complete semantic-model public definition.
+`TMDL` should be explicitly specified even though Fabric currently documents it as the default definition format.
 
-Fabric explicitly supports TMDL and currently defaults to TMDL when no format is supplied. Explicitly specifying:
-
-```text
-format=TMDL
-```
-
-is still recommended for clarity.
-
-Example:
+Example response:
 
 ```json
 {
@@ -782,12 +597,12 @@ Example:
     "parts": [
       {
         "path": "definition/database.tmdl",
-        "payload": "...",
+        "payload": "<base64>",
         "payloadType": "InlineBase64"
       },
       {
         "path": "definition/roles/abc.tmdl",
-        "payload": "...",
+        "payload": "<base64>",
         "payloadType": "InlineBase64"
       }
     ]
@@ -795,23 +610,31 @@ Example:
 }
 ```
 
----
+Fabric documents that Get Definition requires read and write permission and can return either `200 OK` or `202 Accepted`.
 
-# 20. Long-Running Operation Handling
+An important limitation is that Fabric currently blocks this API for a semantic model with an encrypted sensitivity label.
 
-`getDefinition` may return:
+Official reference:
 
 ```text
-200 OK
+Microsoft Learn
+Fabric REST API
+Semantic Model
+Get Semantic Model Definition
+API Version: v1
 ```
 
-or:
+---
+
+# 15. API 3 — Long Running Operation State
+
+Get Definition and Update Definition may return:
 
 ```text
 202 Accepted
 ```
 
-For `202`, Fabric returns:
+When that happens, Fabric returns:
 
 ```text
 Location
@@ -819,222 +642,81 @@ x-ms-operation-id
 Retry-After
 ```
 
+Fabric's LRO documentation defines these headers and recommends waiting for the provided `Retry-After` duration before polling.
 
-Generic process:
+Request:
 
-```text
-API invocation
-     |
-     +--> 200
-     |      |
-     |      +--> use response
-     |
-     +--> 202
-            |
-            +--> capture operation ID
-            |
-            +--> wait Retry-After
-            |
-            +--> GET operation state
-            |
-            +--> Running
-            |       |
-            |       +--> repeat
-            |
-            +--> Succeeded
-                    |
-                    +--> get operation result
+```http
+GET https://api.fabric.microsoft.com/v1/operations/{operationId}
 ```
 
-The same reusable LRO component should be used for:
+Possible states include:
 
 ```text
-Get Definition
-Update Definition
+NotStarted
+Running
+Succeeded
+Failed
+```
+
+Fabric documents this API as returning the current state of the long-running operation.
+
+Official reference:
+
+```text
+Microsoft Learn
+Fabric REST API
+Core
+Long Running Operations
+Get Operation State
+API Version: v1
 ```
 
 ---
 
-# 21. Core RLS Replace-or-Append Logic
+# 16. API 4 — Long Running Operation Result
 
-Suppose Git contains:
+When an asynchronous operation produces a result, retrieve it using:
+
+```http
+GET https://api.fabric.microsoft.com/v1/operations/{operationId}/result
+```
+
+This is particularly relevant to asynchronous `getDefinition`, because the application needs the resulting semantic-model definition.
+
+Fabric documents this API as returning the result of a completed long-running operation.
+
+Official reference:
 
 ```text
-projects/sales/roles/abc.tmdl
+Microsoft Learn
+Fabric REST API
+Core
+Long Running Operations
+Get Operation Result
+API Version: v1
 ```
 
-Target Fabric path:
-
-```text
-definition/roles/abc.tmdl
-```
-
-Search:
-
-```python
-definition["parts"]
-```
-
-for:
-
-```text
-path == "definition/roles/abc.tmdl"
-```
+The implementation should follow the `Location` returned by Fabric where appropriate rather than making assumptions about whether every LRO has a separate result payload. Fabric's LRO documentation states that the `Location` header changes to the result location once an operation completes when a result exists.
 
 ---
 
-## Existing Role
+# 17. API 5 — Update Semantic Model Definition
 
-If this path exists:
-
-```text
-definition/roles/abc.tmdl
-```
-
-then:
+Purpose:
 
 ```text
-REPLACE
+Submit the complete semantic-model definition
+after applying RLS changes.
 ```
 
-only its `payload`.
-
-Example:
-
-```text
-Existing:
-
-definition/roles/abc.tmdl
-payload = OLD_BASE64
-
-                     ↓
-
-Updated:
-
-definition/roles/abc.tmdl
-payload = NEW_BASE64
-```
-
----
-
-## New Role
-
-If this path does not exist:
-
-```text
-APPEND
-```
-
-a new definition part:
-
-```json
-{
-  "path": "definition/roles/abc.tmdl",
-  "payload": "<base64 representation of abc.tmdl>",
-  "payloadType": "InlineBase64"
-}
-```
-
-Therefore:
-
-```text
-Does definition/roles/abc.tmdl exist?
-             |
-       +-----+-----+
-       |           |
-      YES          NO
-       |           |
-    REPLACE       APPEND
-```
-
----
-
-# 22. Preserve Complete Semantic Model
-
-`updateDefinition` overrides the semantic-model definition supplied to Fabric. Microsoft describes the API explicitly as overriding the semantic model definition.
-
-Therefore never send only:
-
-```text
-definition/roles/abc.tmdl
-```
-
-Instead:
-
-```text
-Get complete definition
-       ↓
-Modify RLS part
-       ↓
-Preserve everything else
-       ↓
-Send complete definition
-```
-
-Example:
-
-```text
-BEFORE
-
-definition/database.tmdl
-definition/model.tmdl
-definition/tables/Customer.tmdl
-definition/tables/Sales.tmdl
-definition/roles/abc.tmdl
-definition.pbism
-.platform
-
-
-AFTER
-
-definition/database.tmdl           unchanged
-definition/model.tmdl              unchanged
-definition/tables/Customer.tmdl    unchanged
-definition/tables/Sales.tmdl       unchanged
-definition/roles/abc.tmdl          UPDATED
-definition.pbism                   unchanged
-.platform                          unchanged
-```
-
----
-
-# 23. Multiple RLS Changes
-
-If one PR contains:
-
-```text
-abc.tmdl
-finance.tmdl
-executive.tmdl
-```
-
-perform:
-
-```text
-Get Definition once
-       ↓
-overlay abc
-       ↓
-overlay finance
-       ↓
-overlay executive
-       ↓
-Update Definition once
-```
-
-Do not call `updateDefinition` three times.
-
----
-
-# 24. Update Semantic Model Definition
-
-API:
+Request:
 
 ```http
 POST https://api.fabric.microsoft.com/v1/workspaces/{workspaceId}/semanticModels/{semanticModelId}/updateDefinition
 ```
 
-Payload:
+Example payload:
 
 ```json
 {
@@ -1049,101 +731,396 @@ Payload:
 }
 ```
 
-For this RLS-only solution:
+Fabric explicitly states that this API **overrides the definition** for the specified semantic model. It supports both immediate `200 OK` and asynchronous `202 Accepted` responses.
+
+For this RLS solution:
 
 ```text
 allowPurgeData = false
 ```
 
-should remain the default.
+must remain the default.
 
-Fabric defines this option as permission to purge model data when definition changes require it, and its default is `false`.
+Fabric also documents `false` as the default value for this option.
 
-RLS changes should not intentionally trigger destructive model-data purging.
+Official reference:
+
+```text
+Microsoft Learn
+Fabric REST API
+Semantic Model
+Update Semantic Model Definition
+API Version: v1
+```
 
 ---
 
-# 25. Post-Deployment Verification
+# 18. Common Fabric Request Headers
 
-After `updateDefinition` reports success:
+Every Fabric request uses:
 
-```text
-Get Definition again
-       ↓
-find definition/roles/abc.tmdl
-       ↓
-decode payload
-       ↓
-compare against approved Git abc.tmdl
+```http
+Authorization: Bearer <access-token>
+Content-Type: application/json
 ```
 
-Successful deployment means:
+Example:
 
-```text
-✓ Semantic model exists
-
-✓ Authentication succeeded
-
-✓ Get Definition succeeded
-
-✓ Role resolved as APPEND or REPLACE
-
-✓ Update Definition succeeded
-
-✓ Fabric LRO succeeded if applicable
-
-✓ Fresh Get Definition succeeded
-
-✓ Target role exists
-
-✓ Deployed role matches Git content
+```python
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
+}
 ```
 
-Only then should the GitHub deployment check pass.
+Tokens must never be written to GitHub logs.
 
 ---
 
-# 26. GitHub Pull Request → DEV
+# 19. Long-Running Operation Handler
 
-Workflow:
+The application should implement one common LRO processor.
+
+Pseudo-flow:
 
 ```text
-Developer
-   |
-   +--> feature branch
-   |
-   +--> changes abc.tmdl
-   |
-   +--> creates PR
-            |
-            v
-     GitHub Actions
-            |
-            v
-   Authenticate using MSAL
-   Service Principal
-            |
-            v
-       DEV config
-            |
-     workspaceId DEV
-     semanticModelId DEV
-            |
-            v
-      Fabric deployment
-            |
-            v
-      Verification
-            |
-       +----+----+
-       |         |
-     PASS       FAIL
-       |         |
-       v         v
- GitHub PR ✓   GitHub PR ✗
+Call Fabric API
+      │
+      ├── 200 OK
+      │      │
+      │      └── return response
+      │
+      └── 202 Accepted
+             │
+             ├── capture Location
+             ├── capture operation ID
+             └── capture Retry-After
+                      │
+                      ▼
+                Wait Retry-After
+                      │
+                      ▼
+                Get Operation State
+                      │
+             ┌────────┼────────┐
+             │        │        │
+          Running   Failed   Succeeded
+             │        │        │
+           repeat    fail      ▼
+                            retrieve result
+                            when applicable
 ```
 
-Recommended trigger:
+Recommended configurable timeout:
+
+```text
+FABRIC_LRO_TIMEOUT_SECONDS=900
+```
+
+The implementation must respect Fabric's `Retry-After` header for polling and throttling responses.
+
+---
+
+# 20. RLS Replace-or-Append Requirement
+
+Suppose Git contains:
+
+```text
+projects/sales/roles/abc.tmdl
+```
+
+The target semantic model definition path is:
+
+```text
+definition/roles/abc.tmdl
+```
+
+The application retrieves:
+
+```python
+definition["parts"]
+```
+
+and searches for an exact path match:
+
+```python
+part["path"] == "definition/roles/abc.tmdl"
+```
+
+The behavior is:
+
+```text
+Does definition/roles/abc.tmdl exist?
+                  │
+           ┌──────┴──────┐
+           │             │
+          YES            NO
+           │             │
+        REPLACE         APPEND
+```
+
+---
+
+# 21. Existing Role — Replace
+
+If Fabric already contains:
+
+```text
+definition/roles/abc.tmdl
+```
+
+the application must replace the existing payload with the Base64 representation of the Git `abc.tmdl`.
+
+Example:
+
+```text
+BEFORE
+
+path:
+definition/roles/abc.tmdl
+
+payload:
+OLD_BASE64
+
+
+AFTER
+
+path:
+definition/roles/abc.tmdl
+
+payload:
+NEW_BASE64
+```
+
+The existing item is replaced by `path`.
+
+No unrelated semantic-model definition element should be modified.
+
+---
+
+# 22. New Role — Append
+
+If:
+
+```text
+definition/roles/abc.tmdl
+```
+
+does not exist, append:
+
+```json
+{
+  "path": "definition/roles/abc.tmdl",
+  "payload": "<BASE64-ENCODED-ABC-TMDL>",
+  "payloadType": "InlineBase64"
+}
+```
+
+to:
+
+```text
+definition.parts[]
+```
+
+---
+
+# 23. Role Overlay Function
+
+Recommended implementation contract:
+
+```python
+def overlay_role(
+    definition: dict,
+    role_file_name: str,
+    role_content: str,
+    role_path_prefix: str = "definition/roles/"
+) -> dict:
+    ...
+```
+
+Conceptual implementation:
+
+```python
+import base64
+
+
+target_path = (
+    role_path_prefix
+    + role_file_name
+)
+
+payload = base64.b64encode(
+    role_content.encode("utf-8")
+).decode("ascii")
+
+
+matches = [
+    part
+    for part in definition["parts"]
+    if part["path"] == target_path
+]
+
+
+new_part = {
+    "path": target_path,
+    "payload": payload,
+    "payloadType": "InlineBase64"
+}
+
+
+if len(matches) > 1:
+    raise DuplicateDefinitionPartError(
+        target_path
+    )
+
+elif len(matches) == 1:
+
+    replace existing part
+
+    operation = "REPLACE"
+
+else:
+
+    definition["parts"].append(
+        new_part
+    )
+
+    operation = "APPEND"
+```
+
+The operation result should expose:
+
+```text
+targetPath
+operation = APPEND | REPLACE
+```
+
+for GitHub reporting.
+
+---
+
+# 24. Multiple RLS Changes
+
+If one PR changes:
+
+```text
+abc.tmdl
+finance.tmdl
+executive.tmdl
+```
+
+perform:
+
+```text
+Get Definition
+      ↓
+Overlay abc
+      ↓
+Overlay finance
+      ↓
+Overlay executive
+      ↓
+Update Definition ONCE
+```
+
+Do not invoke Update Definition separately for every role.
+
+This reduces race conditions and avoids intermediate model states.
+
+---
+
+# 25. Preservation Rule
+
+Suppose Fabric returns:
+
+```text
+definition/database.tmdl
+definition/model.tmdl
+definition/tables/Customer.tmdl
+definition/tables/Sales.tmdl
+definition/relationships.tmdl
+definition/roles/abc.tmdl
+definition.pbism
+.platform
+```
+
+and `abc.tmdl` changes.
+
+The outgoing payload must remain:
+
+```text
+definition/database.tmdl              unchanged
+definition/model.tmdl                 unchanged
+definition/tables/Customer.tmdl       unchanged
+definition/tables/Sales.tmdl          unchanged
+definition/relationships.tmdl         unchanged
+definition/roles/abc.tmdl             changed
+definition.pbism                      unchanged
+.platform                             unchanged
+```
+
+This rule exists because Fabric Update Definition overrides the definition supplied to the API.
+
+---
+
+# 26. Concurrent Change Protection
+
+A read-modify-write API can overwrite changes made between retrieval and update.
+
+The POC should therefore implement:
+
+```text
+Get definition D0
+       ↓
+Prepare proposed RLS overlay
+       ↓
+Get latest definition D1
+       ↓
+Compare non-target definition parts
+       ↓
+Changed?
+   │
+   ├── YES → ABORT
+   │
+   └── NO
+        ↓
+Apply RLS overlay to latest definition
+        ↓
+Update Definition
+```
+
+GitHub Actions concurrency should also prevent parallel deployments to the same:
+
+```text
+project + environment
+```
+
+Example groups:
+
+```text
+sales-dev
+sales-test
+sales-uat
+sales-prod
+```
+
+---
+
+# 27. Pull Request to DEV Workflow
+
+A developer:
+
+```text
+Creates branch
+      ↓
+Adds/updates abc.tmdl
+      ↓
+Pushes branch
+      ↓
+Creates Pull Request
+```
+
+Recommended GitHub trigger:
 
 ```yaml
 on:
@@ -1156,126 +1133,269 @@ on:
       - reopened
 ```
 
----
-
-# 27. Higher-Environment Promotion
-
-After DEV validation and PR approval:
+Deployment sequence:
 
 ```text
-PR approved
-    ↓
-merge to MAIN
-    ↓
-same Git commit SHA
-    ↓
-TEST approval
-    ↓
-load test.json
-    ↓
-TEST workspaceId
-TEST semanticModelId
-    ↓
-deploy
-    ↓
-validate
-    ↓
-UAT approval
-    ↓
-load uat.json
-    ↓
-deploy
-    ↓
-validate
-    ↓
-PROD approval
-    ↓
-load prod.json
-    ↓
-deploy
-    ↓
-validate
+Pull Request
+      ↓
+Detect changed role files
+      ↓
+Load project configuration
+      ↓
+Load DEV configuration
+      ↓
+Authenticate through MSAL
+      ↓
+Get Semantic Model
+      ↓
+Get Definition
+      ↓
+Handle LRO if required
+      ↓
+Overlay changed roles
+      ↓
+Update Definition
+      ↓
+Handle LRO if required
+      ↓
+Get Definition again
+      ↓
+Verify deployed content
+      ↓
+Publish GitHub check
 ```
 
-There is no rebuilding of the RLS definition between environments.
-
 ---
 
-# 28. GitHub Environment Model
+# 28. DEV Pull Request Result
 
-Configure:
+GitHub should expose a check named:
 
 ```text
+RLS / DEV Deployment
+```
+
+Example success:
+
+```text
+RLS DEV Deployment
+
+Project:
+Sales
+
+Environment:
 DEV
-TEST
-UAT
-PROD
+
+Commit:
+57f88...
+
+Roles:
+
+abc.tmdl
+REPLACED ✓
+
+FinanceRestricted.tmdl
+APPENDED ✓
+
+
+Fabric Validation:
+
+Authentication              ✓
+Semantic Model              ✓
+Get Definition              ✓
+RLS Overlay                 ✓
+Update Definition           ✓
+Post-deployment verification ✓
+
+RESULT: SUCCESS
 ```
 
-Recommended governance:
+A failed deployment must make the PR check fail.
 
-| Environment | Trigger | Approval |
+The PR should not be mergeable while the required deployment check is failing.
+
+---
+
+# 29. PR Review
+
+Use GitHub:
+
+```text
+CODEOWNERS
+```
+
+for:
+
+```text
+/projects/**/roles/
+```
+
+Example:
+
+```text
+/projects/**/roles/ @rls-security-team
+```
+
+The protected main branch should require:
+
+```text
+Successful RLS / DEV Deployment
++
+Required reviewer approval
+```
+
+before merge.
+
+---
+
+# 30. Promotion to Higher Environments
+
+DEV is different from TEST/UAT/PROD.
+
+DEV validates the proposed pull request.
+
+TEST, UAT and PROD receive only **reviewed and merged code**.
+
+```text
+Feature Branch
+      ↓
+Pull Request
+      ↓
+DEV Deployment
+      ↓
+Validation
+      ↓
+Approval
+      ↓
+Merge to Main
+      ↓
+Exact Git Commit
+      ↓
+TEST Approval
+      ↓
+TEST Deployment
+      ↓
+TEST Validation
+      ↓
+UAT Approval
+      ↓
+UAT Deployment
+      ↓
+UAT Validation
+      ↓
+PROD Approval
+      ↓
+PROD Deployment
+      ↓
+PROD Validation
+```
+
+---
+
+# 31. GitHub Environment Model
+
+Recommended environments:
+
+| Environment | Deployment | Approval |
 |---|---|---|
-| DEV | Pull request | Automatic |
-| TEST | Approved PR merged | IT / Security |
-| UAT | Successful TEST | Business / Visualization owner |
-| PROD | Successful UAT | Production / Security owner |
+| DEV | Automatic from PR | No deployment approval |
+| TEST | From merged commit | IT / Security |
+| UAT | After successful TEST | Business / Visualization Owner |
+| PROD | After successful UAT | Production / Security Owner |
 
-Use GitHub Environment protection rules for TEST/UAT/PROD.
+The same Git commit SHA must be promoted to all higher environments.
 
-PROD should preferably have:
+The deployment process simply loads:
 
 ```text
-Prevent self-review = enabled
+test.json
+uat.json
+prod.json
+```
+
+to determine the correct:
+
+```text
+workspaceId
+semanticModelId
 ```
 
 ---
 
-# 29. Recommended Runtime Configuration Model
+# 32. Deployment Identity by Environment
 
-Global application configuration:
+For the POC, a single service principal can be used.
 
-```json
-{
-  "fabricBaseUrl": "https://api.fabric.microsoft.com/v1",
-  "authentication": {
-    "mode": "SERVICE_PRINCIPAL",
-    "scope": "https://api.fabric.microsoft.com/.default"
-  }
-}
-```
-
-Sensitive authentication values come from environment variables:
+Production can later move to:
 
 ```text
-FABRIC_TENANT_ID
-FABRIC_CLIENT_ID
-FABRIC_CLIENT_SECRET
+rls-deployer-dev
+rls-deployer-test
+rls-deployer-uat
+rls-deployer-prod
 ```
 
-Per-project configuration:
+This provides workspace-level blast-radius isolation.
 
-```json
-{
-  "projectKey": "sales",
-  "roleDefinitionPathPrefix": "definition/roles/",
-  "roleSourcePath": "projects/sales/roles/"
-}
-```
-
-Per-environment configuration:
-
-```json
-{
-  "environment": "PROD",
-  "workspaceId": "...",
-  "semanticModelId": "..."
-}
-```
+No change to deployment code is required because authentication is abstracted behind `TokenProvider`.
 
 ---
 
-# 30. Fabric Client Design
+# 33. Post-Deployment Validation
+
+After Update Definition succeeds:
+
+```text
+Get Definition again
+      ↓
+Locate expected RLS path
+      ↓
+Decode Base64 payload
+      ↓
+Normalize line endings
+      ↓
+Compare against Git TMDL
+```
+
+A successful deployment requires:
+
+```text
+Semantic model exists                  PASS
+Authentication                         PASS
+Definition retrieved                   PASS
+Target path determined                 PASS
+Role appended/replaced                 PASS
+Definition updated                     PASS
+LRO completed                          PASS
+Definition re-read                     PASS
+RLS path exists                        PASS
+RLS payload matches Git                PASS
+```
+
+Only then should the deployment be marked successful.
+
+---
+
+# 34. RLS Deletion
+
+Role deletion is deliberately excluded from the first POC.
+
+Behavior:
+
+```text
+ADD       supported
+UPDATE    supported
+DELETE    rejected
+RENAME    rejected
+```
+
+Removing a role can weaken security, so a future deletion mechanism should require an explicit delete operation and stronger approval.
+
+Deleting `abc.tmdl` from Git must therefore **not automatically delete** the Fabric role.
+
+---
+
+# 35. Fabric Client Interface
 
 Recommended:
 
@@ -1295,15 +1415,15 @@ class FabricClient:
         workspace_id,
         semantic_model_id
     ):
-        ...
+        pass
 
     def get_semantic_model_definition(
         self,
         workspace_id,
         semantic_model_id,
-        format="TMDL"
+        definition_format="TMDL"
     ):
-        ...
+        pass
 
     def update_semantic_model_definition(
         self,
@@ -1311,71 +1431,50 @@ class FabricClient:
         semantic_model_id,
         definition
     ):
-        ...
+        pass
 
     def get_operation_state(
         self,
         operation_id
     ):
-        ...
+        pass
 
     def get_operation_result(
         self,
         operation_id
     ):
-        ...
+        pass
 
     def wait_for_operation(
         self,
-        operation_id
+        operation_id,
+        retry_after=None
     ):
-        ...
+        pass
 ```
 
 ---
 
-# 31. Recommended Authentication Factory
+# 36. Error Model
 
-```python
-def create_token_provider(config):
-
-    mode = config["authentication"]["mode"]
-
-    if mode == "SERVICE_PRINCIPAL":
-        return ServicePrincipalTokenProvider(...)
-
-    if mode == "USER_INTERACTIVE":
-        return InteractiveUserTokenProvider(...)
-
-    if mode == "USER_DEVICE_CODE":
-        return DeviceCodeTokenProvider(...)
-
-    raise ValueError(
-        f"Unsupported authentication mode: {mode}"
-    )
-```
-
-This keeps the business/deployment logic completely independent of authentication type.
-
----
-
-# 32. Error Handling
-
-Authentication failures should be reported separately from Fabric authorization failures.
-
-Example:
+The application should expose meaningful errors such as:
 
 ```text
 AUTHENTICATION_FAILED
-    Unable to obtain Entra access token
 
-AUTHORIZATION_FAILED
-    Access token valid but identity cannot access semantic model
+FABRIC_AUTHORIZATION_FAILED
 
 SEMANTIC_MODEL_NOT_FOUND
-    Configured workspace/model combination invalid
 
 GET_DEFINITION_FAILED
+
+ENCRYPTED_SENSITIVITY_LABEL_NOT_SUPPORTED
+
+DUPLICATE_ROLE_PATH
+
+ROLE_PATH_COLLISION
+
+CONCURRENT_MODEL_CHANGE_DETECTED
 
 UPDATE_DEFINITION_FAILED
 
@@ -1383,244 +1482,452 @@ LRO_FAILED
 
 LRO_TIMEOUT
 
-RLS_VERIFICATION_FAILED
+FABRIC_RATE_LIMITED
+
+POST_DEPLOYMENT_VALIDATION_FAILED
+
+ROLE_DELETE_NOT_SUPPORTED
 ```
 
-Never output:
-
-```text
-Client secret
-Access token
-Refresh token
-Complete Base64 semantic-model definition
-```
-
-into GitHub logs.
+Fabric documents `429 Too Many Requests` and returns `Retry-After`; the client must respect that value.
 
 ---
 
-# 33. POC Authentication Acceptance Tests
+# 37. Security Requirements
 
-### Service Principal
-
-Given:
+The application must never log:
 
 ```text
-tenantId
-clientId
-clientSecret
+Client secrets
+Access tokens
+Refresh tokens
+GitHub secrets
+Complete Base64 semantic-model payloads
 ```
 
-the application must successfully call:
+For the POC, client-secret authentication using MSAL is acceptable.
 
-```python
-acquire_token_for_client(
-    scopes=[
-        "https://api.fabric.microsoft.com/.default"
-    ]
-)
-```
-
-and obtain an access token.
-
-Then:
+A production evolution can replace the client secret with:
 
 ```text
-GET Semantic Model → 200
+Certificate authentication
+or
+Workload identity federation
 ```
 
-must succeed.
+without changing the Fabric deployment architecture.
 
 ---
 
-### Invalid Service Principal
+# 38. Unit Test Requirements
 
-Invalid credentials:
+Mandatory unit-test coverage should include:
 
 ```text
-Token acquisition fails
-        ↓
-Fabric API must NOT be invoked
-        ↓
-GitHub job fails
+Service principal authentication success
+Service principal authentication failure
+
+Existing role → REPLACE
+
+Missing role → APPEND
+
+Multiple roles → single updated definition
+
+Non-RLS definition parts preserved
+
+Base64 encoding/decoding
+
+Duplicate role path rejected
+
+Role deletion rejected
+
+Get Definition 200 path
+
+Get Definition 202 LRO path
+
+Update Definition 200 path
+
+Update Definition 202 LRO path
+
+Running → Succeeded LRO
+
+Failed LRO
+
+LRO timeout
+
+429 Retry-After
+
+Concurrent non-RLS change detected
+
+Post-deployment RLS verification
+```
+
+The most important invariant is:
+
+```text
+For every definition part that is NOT
+a requested RLS target path:
+
+BEFORE.path    == AFTER.path
+BEFORE.payload == AFTER.payload
 ```
 
 ---
 
-### Valid Token but Missing Fabric Permission
+# 39. POC Acceptance Scenario — Existing Role
+
+Initial Fabric model:
 
 ```text
-Token succeeds
-        ↓
-Fabric API returns authorization failure
-        ↓
-Pipeline reports FABRIC_AUTHORIZATION_FAILED
+definition/database.tmdl
+definition/model.tmdl
+definition/tables/customer.tmdl
+definition/roles/abc.tmdl
+definition.pbism
+.platform
+```
+
+Git PR changes:
+
+```text
+abc.tmdl
+```
+
+Application finds:
+
+```text
+definition/roles/abc.tmdl
+```
+
+Result:
+
+```text
+REPLACE
+```
+
+Expected GitHub result:
+
+```text
+RLS / DEV Deployment ✓
+
+abc.tmdl
+Operation: REPLACED
+Verification: PASSED
 ```
 
 ---
 
-### Interactive User
+# 40. POC Acceptance Scenario — New Role
 
-User starts local application:
+Fabric does not contain:
 
 ```text
-Browser authentication
-        ↓
-Microsoft Entra login
-        ↓
-SemanticModel.ReadWrite.All
-        ↓
-Access token
-        ↓
-Fabric API
+definition/roles/NewFinanceRole.tmdl
+```
+
+Git introduces:
+
+```text
+NewFinanceRole.tmdl
+```
+
+Result:
+
+```text
+APPEND
+```
+
+Expected GitHub result:
+
+```text
+RLS / DEV Deployment ✓
+
+NewFinanceRole.tmdl
+Operation: APPENDED
+Verification: PASSED
 ```
 
 ---
 
-# 34. Final End-to-End POC Definition
-
-The POC is complete when:
+# 41. Complete POC End-to-End Flow
 
 ```text
-1. Developer creates feature branch.
-
-2. Developer adds or updates:
-   projects/sales/roles/abc.tmdl
-
-3. Developer creates PR.
-
-4. GitHub Action starts.
-
-5. Application loads DEV configuration.
-
-6. Application reads:
-   FABRIC_TENANT_ID
-   FABRIC_CLIENT_ID
-   FABRIC_CLIENT_SECRET
-
-7. MSAL creates:
-   ConfidentialClientApplication
-
-8. Authority:
-   https://login.microsoftonline.com/<tenantId>
-
-9. Application calls:
-   acquire_token_for_client()
-
-10. Scope:
-    https://api.fabric.microsoft.com/.default
-
-11. Fabric access token returned.
-
-12. Application calls:
-    Get Semantic Model.
-
-13. Application calls:
-    Get Definition.
-
-14. Any LRO is handled.
-
-15. Application searches for:
-    definition/roles/abc.tmdl
-
-16. Existing:
-    REPLACE.
-
-    Missing:
-    APPEND.
-
-17. All unrelated semantic-model
-    definition parts remain unchanged.
-
-18. Application calls:
-    Update Definition.
-
-19. Any update LRO is handled.
-
-20. Application calls Get Definition again.
-
-21. Deployed role is compared
-    against Git.
-
-22. DEV GitHub check passes.
-
-23. Required reviewer approves PR.
-
-24. PR is merged.
-
-25. TEST waits for GitHub
-    Environment approval.
-
-26. Application loads test.json.
-
-27. Same Git RLS definition is
-    deployed to configured TEST
-    workspaceId + semanticModelId.
-
-28. Same pattern applies to UAT.
-
-29. Same pattern applies to PROD.
-
-30. PROD uses the same approved Git
-    commit/RLS definition.
-
-31. All deployment operations and
-    approvals are visible through GitHub.
+Developer creates feature branch
+             ↓
+Developer changes abc.tmdl
+             ↓
+Developer creates PR
+             ↓
+GitHub Actions starts
+             ↓
+Load DEV workspaceId + semanticModelId
+             ↓
+Create MSAL ConfidentialClientApplication
+             ↓
+Authority:
+https://login.microsoftonline.com/<tenantId>
+             ↓
+Scope:
+https://api.fabric.microsoft.com/.default
+             ↓
+acquire_token_for_client()
+             ↓
+Fabric Access Token
+             ↓
+GET Semantic Model
+             ↓
+Semantic model exists
+             ↓
+POST Get Definition?format=TMDL
+             ↓
+200?
+ │
+ ├── YES → definition available
+ │
+ └── NO / 202
+          ↓
+     Poll LRO
+          ↓
+     Get Operation Result
+             ↓
+Search:
+definition/roles/abc.tmdl
+             ↓
+       ┌─────┴─────┐
+       │           │
+     Exists      Missing
+       │           │
+    REPLACE       APPEND
+       └─────┬─────┘
+             ↓
+Preserve all other definition parts
+             ↓
+POST Update Definition
+             ↓
+200?
+ │
+ ├── YES
+ │
+ └── 202
+       ↓
+   Poll LRO
+             ↓
+Update succeeds
+             ↓
+Get Definition again
+             ↓
+Verify abc.tmdl against Git
+             ↓
+GitHub DEV Check = SUCCESS
+             ↓
+Reviewer approves PR
+             ↓
+Merge to main
+             ↓
+TEST approval
+             ↓
+Load TEST workspaceId + semanticModelId
+             ↓
+Deploy same Git commit
+             ↓
+Verify
+             ↓
+UAT approval
+             ↓
+Deploy same Git commit
+             ↓
+Verify
+             ↓
+PROD approval
+             ↓
+Deploy same Git commit
+             ↓
+Verify
 ```
 
-## Core Architectural Principle
+---
+
+# 42. API Reference Documentation
+
+The repository must maintain:
 
 ```text
-Git
+docs/fabric-api-reference.md
+```
+
+Header:
+
+```text
+Microsoft Fabric REST API Reference
+API Version: v1
+Base URL: https://api.fabric.microsoft.com/v1
+Last Validated: 2026-09-28
+```
+
+The reference must contain the five APIs used by this solution.
+
+| API | Solution Usage |
+|---|---|
+| Get Semantic Model | Validate target semantic model |
+| Get Semantic Model Definition | Retrieve complete TMDL definition |
+| Get Operation State | Poll asynchronous Fabric requests |
+| Get Operation Result | Retrieve completed asynchronous result |
+| Update Semantic Model Definition | Deploy complete modified definition |
+
+Official Microsoft documentation references maintained for this solution are: **Get Semantic Model**, **Get Semantic Model Definition**, **Update Semantic Model Definition**, **Get Operation State**, **Get Operation Result**, and the general Fabric **Long Running Operations** guidance.
+
+---
+
+# 43. Authentication Reference Documentation
+
+The repository must also maintain:
+
+```text
+docs/authentication.md
+```
+
+Primary implementation:
+
+```text
+Authentication:
+OAuth 2.0 Client Credentials
+
+Identity:
+Microsoft Entra Service Principal
+
+Python Library:
+msal
+
+MSAL Application:
+ConfidentialClientApplication
+
+Authority:
+https://login.microsoftonline.com/<tenantId>
+
+Scope:
+https://api.fabric.microsoft.com/.default
+
+Token Method:
+acquire_token_for_client()
+```
+
+Optional local authentication:
+
+```text
+Authentication:
+OAuth delegated user authentication
+
+MSAL Application:
+PublicClientApplication
+
+Scope:
+https://api.fabric.microsoft.com/SemanticModel.ReadWrite.All
+```
+
+---
+
+# 44. Explicit POC Non-Goals
+
+The POC does not:
+
+```text
+Modify Power BI reports
+
+Modify visual definitions
+
+Modify measures
+
+Modify tables
+
+Modify relationships
+
+Modify Power Query
+
+Manage semantic-model development
+
+Use XMLA/TOM for deployment
+
+Automatically delete RLS roles
+
+Automatically rename roles
+
+Allow failed deployments to promote
+
+Generate different RLS TMDL per environment
+```
+
+---
+
+# 45. Definition of Done
+
+The POC is considered complete when a developer can change or add an RLS TMDL file through a GitHub pull request and the system successfully:
+
+```text
+Authenticates using MSAL and a Service Principal
+
+Validates the configured Fabric semantic model
+
+Retrieves its complete TMDL definition
+
+Processes Fabric long-running operations
+
+Detects whether the role path already exists
+
+Replaces an existing RLS role
+
+or
+
+Appends a new RLS role
+
+Preserves all unrelated definition parts
+
+Updates the semantic model using Fabric REST API
+
+Re-reads the semantic model
+
+Verifies deployed RLS content against Git
+
+Displays deployment status in the Pull Request
+
+Requires review before merge
+
+Promotes the identical approved Git commit through
+TEST → UAT → PROD
+
+Uses environment-specific workspaceId and semanticModelId
+
+Records success/failure for every promotion
+```
+
+The architectural contract is therefore:
+
+```text
+GitHub
 =
 Source of Truth for governed RLS definitions
 
-Fabric
+
+Microsoft Fabric
 =
-Source of Truth for the complete live semantic model
+Source of Truth for complete live semantic-model definition
+
+
+Environment configuration
+=
+workspaceId + semanticModelId
+
+
+Authentication
+=
+Microsoft Entra OAuth 2.0
+using MSAL
+
+
+Deployment
+=
+Get complete definition
+→ Replace/Append RLS
+→ Update complete definition
+→ Re-read
+→ Verify
 ```
-
-Therefore every deployment follows:
-
-```text
-Git RLS TMDL
-       +
-Live Fabric complete definition
-       |
-       v
-Replace existing role
-OR
-Append missing role
-       |
-       v
-Complete updated Fabric definition
-       |
-       v
-Update Semantic Model Definition
-       |
-       v
-Re-read + verify
-```
-
-Authentication is deliberately separated from this deployment logic:
-
-```text
-GitHub CI/CD
-       |
-       v
-MSAL
-       |
-       v
-OAuth 2.0 Client Credentials
-       |
-       v
-Service Principal
-       |
-       v
-Fabric Access Token
-       |
-       v
-Fabric Semantic Model APIs
-```
-
-Interactive user authentication remains an optional development and support mechanism, not the primary production deployment identity.
