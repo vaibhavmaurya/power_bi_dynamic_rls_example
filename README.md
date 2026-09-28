@@ -38,3 +38,5 @@ model.
 - [`docs/fabric-api-reference.md`](docs/fabric-api-reference.md) — the five Fabric REST APIs used
 - [`docs/authentication.md`](docs/authentication.md) — MSAL / Entra ID authentication design
 - [`docs/github-cicd.md`](docs/github-cicd.md) — workflows, branch protection, required secrets
+- [`docs/pull-request-workflow.md`](docs/pull-request-workflow.md) — step-by-step GitHub setup
+  (environments, secrets, branch protection) and the full PR → DEV → TEST → UAT → PROD walkthrough

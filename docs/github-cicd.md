@@ -1,5 +1,11 @@
 # GitHub CI/CD
 
+For the concrete, step-by-step setup (creating the GitHub Environments, adding secrets,
+configuring branch protection, and walking through a real PR end to end — including the
+solo-maintainer approval flow), see
+[`docs/pull-request-workflow.md`](pull-request-workflow.md). This page covers the workflow
+files themselves at a reference level.
+
 ## Workflows
 
 ### `.github/workflows/pr-dev.yml` — RLS / DEV Deployment
@@ -34,9 +40,12 @@ environment instead.
 ## Branch protection / review
 
 - `.github/CODEOWNERS` requires `@rls-security-team` review on any change under
-  `/projects/**/roles/`.
-- The `main` branch protection rule should require both a successful `RLS / DEV Deployment`
-  check and CODEOWNERS approval before merge.
+  `/projects/**/roles/`. This assumes a team distinct from the PR author; for a solo
+  maintainer, GitHub cannot self-approve a PR review at all, so
+  [`docs/pull-request-workflow.md`](pull-request-workflow.md) uses the required DEV status
+  check plus per-environment deployment approvals as the gate instead of a required PR review.
+- Once a real reviewer team exists, the `main` branch protection rule should require both a
+  successful `RLS / DEV Deployment` check and CODEOWNERS approval before merge.
 
 ## Required secrets
 
