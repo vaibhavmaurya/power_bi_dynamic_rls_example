@@ -107,6 +107,64 @@ done
 Also update `projects/sales/environments/{dev,test,uat,prod}.json` with your real
 `workspaceId` / `semanticModelId` values. These are not secrets — commit them normally.
 
+### 3.1 Sourcing values from `check.txt` for a local/POC setup
+
+`check.txt` (repo root, git-ignored, never committed) holds `tenant_id`, `client_id`, `secret`,
+`WORKSPACE_ID`, and `semanticModelId` in `name = "value"` lines. This is how the four
+environment secrets in this repo were actually populated for the POC:
+
+```bash
+# 1. Install and authenticate the GitHub CLI once (interactive login happens in your own
+#    terminal so your token never passes through any automation):
+winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements
+gh auth login
+
+# 2. Extract the three auth values from check.txt into short-lived temp files, using a real
+#    Python interpreter (not a Microsoft Store app-execution-alias stub, which silently no-ops)
+#    and a plain "name = value" regex rather than exec()'ing the file:
+python - <<'PYEOF'
+import re
+with open("check.txt", encoding="utf-8") as f:
+    content = f.read()
+vals = dict(re.findall(r'^(\w+)\s*=\s*"([^"]*)"', content, re.MULTILINE))
+with open("fabric_tenant_id.tmp", "w") as f: f.write(vals["tenant_id"])
+with open("fabric_client_id.tmp", "w") as f: f.write(vals["client_id"])
+with open("fabric_client_secret.tmp", "w") as f: f.write(vals["secret"])
+PYEOF
+
+# 3. Push each value into every environment (gh secret set reads stdin/a file, so the value
+#    never appears as a CLI argument or in shell history):
+OWNER_REPO="vaibhavmaurya/power_bi_dynamic_rls_example"
+for ENV in DEV TEST UAT PROD; do
+  gh secret set FABRIC_TENANT_ID     --env "$ENV" --repo "$OWNER_REPO" < fabric_tenant_id.tmp
+  gh secret set FABRIC_CLIENT_ID     --env "$ENV" --repo "$OWNER_REPO" < fabric_client_id.tmp
+  gh secret set FABRIC_CLIENT_SECRET --env "$ENV" --repo "$OWNER_REPO" < fabric_client_secret.tmp
+done
+
+# 4. Delete the temp files immediately — never leave decrypted secrets sitting on disk:
+rm -f fabric_tenant_id.tmp fabric_client_id.tmp fabric_client_secret.tmp
+
+# 5. Confirm presence (gh never returns secret values back, only names + last-updated time):
+for ENV in DEV TEST UAT PROD; do gh secret list --env "$ENV" --repo "$OWNER_REPO"; done
+```
+
+Because `check.txt`'s `WORKSPACE_ID` / `semanticModelId` are the only Fabric workspace
+available for this POC, the same values were copied into all four
+`projects/sales/environments/*.json` files — meaning DEV/TEST/UAT/PROD currently all point at
+the *same* live semantic model. That's fine for exercising the approval workflow, but it means
+a PROD "deployment" isn't actually isolated from DEV/TEST — replace each environment file with
+its own real `workspaceId`/`semanticModelId` once separate Fabric workspaces exist per
+environment (spec section 32).
+
+⚠️ **This specific `check.txt` secret is not a placeholder** — it was confirmed to
+authenticate against a real Fabric tenant during earlier testing and had already been
+committed to this repository's git history in an earlier commit. Treat it as compromised:
+rotate it in Microsoft Entra ID and re-run steps 2-3 above with the new secret as soon as
+possible. Until it's rotated, anyone who has ever cloned this repository (or who clones it in
+the future, since git history retains the old commit) can authenticate as this Service
+Principal — pushing it into GitHub environment secrets does not add new exposure beyond that,
+but it doesn't reduce it either.
+
 ---
 
 ## 4. Configure branch protection on `main`
@@ -193,13 +251,16 @@ DEV, TEST, UAT, and PROD.
 
 ## Summary checklist
 
-- [ ] Fabric Service Principal secret rotated (not the one ever committed to this repo)
-- [ ] `DEV`, `TEST`, `UAT`, `PROD` GitHub Environments created
-- [ ] `DEV` has no required reviewers; `TEST`/`UAT`/`PROD` have you as a required reviewer
-- [ ] `FABRIC_TENANT_ID` / `FABRIC_CLIENT_ID` / `FABRIC_CLIENT_SECRET` set as environment
-      secrets on all four environments
-- [ ] `projects/sales/environments/*.json` updated with real `workspaceId` /
-      `semanticModelId` values
+- [x] `DEV`, `TEST`, `UAT`, `PROD` GitHub Environments created
+- [x] `DEV` has no required reviewers; `TEST`/`UAT`/`PROD` have `vaibhavmaurya` as required reviewer
+- [x] `FABRIC_TENANT_ID` / `FABRIC_CLIENT_ID` / `FABRIC_CLIENT_SECRET` set as environment
+      secrets on all four environments (sourced from `check.txt`, see 3.1)
+- [x] `projects/sales/environments/*.json` updated with real `workspaceId` /
+      `semanticModelId` values (currently the same workspace across all four — see 3.1's note
+      on environment isolation)
+- [ ] **Fabric Service Principal secret rotated** — the value currently live in all four
+      environments is the one already exposed in this repo's git history; this is still
+      outstanding
 - [ ] Branch protection on `main` requires the `RLS / DEV Deployment` status check, with
       required PR approvals left at 0
 - [ ] Email notifications enabled for Actions under your GitHub account settings

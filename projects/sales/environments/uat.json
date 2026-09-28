@@ -1,5 +1,5 @@
 {
   "environment": "UAT",
-  "workspaceId": "<UAT-WORKSPACE-ID>",
-  "semanticModelId": "<UAT-SEMANTIC-MODEL-ID>"
+  "workspaceId": "64e60a4f-0550-40f7-9795-f48ccc8924e0",
+  "semanticModelId": "2dc02bd0-0fca-447c-9a7b-62b4a431e3ff"
 }
