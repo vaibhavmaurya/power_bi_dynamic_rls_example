@@ -1,0 +1,4 @@
+role DynamicUserSecurity5
+	modelPermission: read
+
+	tablePermission user = user[EmailID] = USERPRINCIPALNAME()
