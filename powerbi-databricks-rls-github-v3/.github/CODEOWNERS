@@ -1,4 +1,0 @@
-semantic-model/definition/roles/ @security-team @powerbi-team
-config/environments/ @powerbi-team
-.github/workflows/ @platform-team
-databricks/ @data-platform-team

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Centralized Power BI RLS Governance – RLS Only</title>
+<style>
+:root{
+  --bg:#f5f7fb; --card:#fff; --ink:#182033; --muted:#667085; --line:#d7deea;
+  --blue:#2457d6; --purple:#6b4fd3; --green:#18794e; --amber:#a45f00; --red:#a83b3b;
+  --softb:#eef3ff; --softp:#f3efff; --softg:#edf8f2; --softa:#fff7e8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 "Segoe UI",Arial,sans-serif}
+.wrap{max-width:1500px;margin:auto;padding:28px}
+h1{margin:0 0 6px;font-size:30px} h2{font-size:20px;margin:6px 0 14px} h3{font-size:15px;margin:0 0 7px}
+.sub{color:var(--muted);margin-bottom:18px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.tab{border:1px solid var(--line);background:#fff;border-radius:9px;padding:9px 13px;font-weight:650;cursor:pointer}
+.tab.active{background:#182033;color:#fff;border-color:#182033}
+.panel{display:none}.panel.active{display:block}
+.grid{display:grid;gap:16px}.g3{grid-template-columns:1fr 1.45fr 1fr}.g2{grid-template-columns:1fr 1fr}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(30,45,80,.05)}
+.blue{border-top:4px solid var(--blue)}.purple{border-top:4px solid var(--purple)}.green{border-top:4px solid var(--green)}.amber{border-top:4px solid var(--amber)}
+.box{border:1px solid var(--line);border-radius:10px;padding:11px;margin:8px 0;background:#fff}
+.sb{background:var(--softb);border-color:#cbd9ff}.sp{background:var(--softp);border-color:#d9cdfc}.sg{background:var(--softg);border-color:#c7ead6}.sa{background:var(--softa);border-color:#efd7ac}
+.arrow{text-align:center;font-size:23px;color:#7a8497;margin:4px 0}
+.small{font-size:12px;color:var(--muted)}
+pre{white-space:pre-wrap;background:#101827;color:#e9eef7;border-radius:11px;padding:15px;overflow:auto;font-size:12px}
+code{font-family:Consolas,monospace;background:#eef1f5;border-radius:4px;padding:2px 5px}
+ul{margin:6px 0 0 18px;padding:0} li{margin:4px 0}
+.flow{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap}
+.step{flex:1;min-width:155px;background:#fff;border:1px solid var(--line);border-radius:11px;padding:12px;text-align:center}
+.sep{align-self:center;font-size:22px;color:#7d8799}
+.envrow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
+.env{background:#fff;border:1px solid var(--line);border-radius:11px;padding:13px;position:relative}
+.env:after{content:"→";position:absolute;right:-11px;top:36%;font-size:18px;color:#80899b}
+.env:last-child:after{content:""}
+.badge{display:inline-block;padding:3px 8px;border-radius:999px;background:#edf1f6;font-size:11px;font-weight:700}
+.note{margin-top:14px;background:#fff;border:1px dashed #aeb8c8;border-radius:10px;padding:12px 14px}
+.warn{border-left:4px solid var(--amber);padding-left:11px;margin:10px 0}
+.good{border-left:4px solid var(--green);padding-left:11px;margin:10px 0}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line)}
+th,td{padding:9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:#f1f4f8}
+@media(max-width:980px){.g3,.g2,.envrow{grid-template-columns:1fr}.env:after{content:"↓";right:auto;left:50%;top:auto;bottom:-17px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Centralized Power BI RLS Governance</h1>
+<div class="sub">Scope intentionally limited to RLS version control, validation, deployment, promotion and monitoring. Report development remains completely outside this solution.</div>
+
+<div class="tabs">
+<button class="tab active" onclick="show('scope',this)">1. Scope & Ownership</button>
+<button class="tab" onclick="show('repo',this)">2. RLS Repository</button>
+<button class="tab" onclick="show('precheck',this)">3. Pre-Deployment Checks</button>
+<button class="tab" onclick="show('pipeline',this)">4. CI/CD Promotion</button>
+<button class="tab" onclick="show('runtime',this)">5. Runtime Security</button>
+</div>
+
+<section id="scope" class="panel active">
+  <div class="grid g3">
+    <div class="card blue">
+      <h2>Existing Visualization Process</h2>
+      <div class="box sb"><b>Untouched by this architecture</b>
+        <ul>
+          <li>Report authoring process</li>
+          <li>Visual design</li>
+          <li>Semantic-model creation</li>
+          <li>Measures and business logic</li>
+          <li>Publishing process</li>
+        </ul>
+      </div>
+      <div class="small">The visualization team does not need to adopt code-based report development.</div>
+    </div>
+
+    <div class="card purple">
+      <h2>Central IT – RLS Control Plane</h2>
+      <div class="box sp"><b>Only security artifacts are version controlled</b>
+        <ul>
+          <li>RLS role TMDL files</li>
+          <li>Project/environment mapping</li>
+          <li>Security dependency contract</li>
+          <li>RLS validation test cases</li>
+        </ul>
+      </div>
+      <div class="arrow">↓</div>
+      <div class="box sp"><b>Pipeline responsibilities</b>
+        <ul>
+          <li>Validate target workspace</li>
+          <li>Validate report exists</li>
+          <li>Validate semantic model exists</li>
+          <li>Validate report → semantic model binding</li>
+          <li>Validate required model objects</li>
+          <li>Deploy only RLS role changes</li>
+          <li>Test and detect drift</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card green">
+      <h2>Target Power BI Assets</h2>
+      <div class="box sg"><b>Workspace</b><br/><span class="small">Must match configured environment.</span></div>
+      <div class="box sg"><b>Report(s)</b><br/><span class="small">Existence + binding validation only. Never modified.</span></div>
+      <div class="box sg"><b>Semantic Model</b><br/><span class="small">RLS role objects are updated; all other model content remains untouched.</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="repo" class="panel">
+<h2>Recommended RLS-Only Repository</h2>
+<pre>powerbi-rls-governance/
+├── projects/
+│   ├── sales/
+│   │   ├── project.json
+│   │   ├── security-contract.json
+│   │   ├── roles/
+│   │   │   ├── DynamicBusinessAccess.tmdl
+│   │   │   └── RestrictedFinance.tmdl
+│   │   ├── tests/
+│   │   │   └── rls-tests.json
+│   │   └── environments/
+│   │       ├── dev.json
+│   │       ├── test.json
+│   │       ├── uat.json
+│   │       └── prod.json
+│   └── operations/
+│       └── ...
+├── scripts/
+│   ├── detect_changed_projects.py
+│   ├── validate_targets.py
+│   ├── validate_security_contract.py
+│   ├── deploy_roles_xmla.py
+│   ├── test_rls.py
+│   └── detect_drift.py
+└── .github/workflows/
+    ├── validate.yml
+    ├── deploy-dev.yml
+    └── promote.yml</pre>
+
+<div class="grid g2">
+  <div class="card">
+    <h3>Environment mapping example</h3>
+    <pre>{
+  "workspaceId": "...",
+  "semanticModelId": "...",
+  "reportIds": [
+    "..."
+  ]
+}</pre>
+  </div>
+  <div class="card">
+    <h3>Role storage</h3>
+    <pre>roles/
+├── DynamicBusinessAccess.tmdl
+├── FinanceRestricted.tmdl
+└── ExecutiveAccess.tmdl</pre>
+    <div class="small">One file per role provides granular Git history, review and deployment.</div>
+  </div>
+</div>
+</section>
+
+<section id="precheck" class="panel">
+<h2>Mandatory Pre-Deployment Validation</h2>
+<div class="flow">
+  <div class="step"><b>1. Workspace</b><br/><span class="small">Configured workspace exists and deployment identity can access it</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>2. Report</b><br/><span class="small">Expected report ID exists in that workspace</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>3. Semantic Model</b><br/><span class="small">Configured semantic model ID exists</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>4. Binding</b><br/><span class="small">Report datasetId == configured semanticModelId</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>5. Security Contract</b><br/><span class="small">RLS tables / columns / relationships still exist</span></div>
+</div>
+
+<div class="arrow">↓</div>
+<div class="box sg" style="max-width:700px;margin:10px auto;text-align:center">
+<b>Only after every check passes</b><br/>Apply targeted RLS role create / update / delete
+</div>
+
+<table style="margin-top:18px">
+<tr><th>Validation</th><th>Preferred mechanism</th><th>Failure behavior</th></tr>
+<tr><td>Workspace exists</td><td>Fabric Workspace API</td><td>Fail pipeline</td></tr>
+<tr><td>Report exists</td><td>Power BI Reports-in-Workspace API / Fabric Report API</td><td>Fail pipeline</td></tr>
+<tr><td>Semantic model exists</td><td>Fabric Semantic Models API</td><td>Fail pipeline</td></tr>
+<tr><td>Report uses expected semantic model</td><td>Power BI Reports API <code>datasetId</code></td><td>Fail pipeline</td></tr>
+<tr><td>Security dependencies exist</td><td>XMLA/TOM metadata inspection</td><td>Fail pipeline</td></tr>
+<tr><td>Current role state</td><td>XMLA/TOM</td><td>Compare with Git before modification</td></tr>
+</table>
+
+<div class="note"><b>Important:</b> Power BI RLS belongs to the semantic model. A report is not technically required for the role to exist. The report check is a governance rule that prevents deploying security to an orphaned, renamed, or incorrectly mapped project.</div>
+</section>
+
+<section id="pipeline" class="panel">
+<h2>Selective Change and Promotion Flow</h2>
+<div class="flow">
+  <div class="step"><b>RLS change</b><br/><span class="small">Only project security files change</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>Git path detection</b><br/><span class="small">Determine affected project + roles</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>PR validation</b><br/><span class="small">Syntax + target + contract checks</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>Security review</b><br/><span class="small">CODEOWNERS approval</span></div>
+  <div class="sep">→</div>
+  <div class="step"><b>DEV deploy</b><br/><span class="small">Only changed RLS roles</span></div>
+</div>
+
+<div class="envrow">
+  <div class="env"><span class="badge">DEV</span><h3>Automatic after merge</h3><div class="small">Pre-check → RLS deploy → tests</div></div>
+  <div class="env"><span class="badge">TEST</span><h3>Approval</h3><div class="small">Same approved commit/artifact</div></div>
+  <div class="env"><span class="badge">UAT</span><h3>Security / business gate</h3><div class="small">Identity-based UAT</div></div>
+  <div class="env"><span class="badge">PROD</span><h3>Protected approval</h3><div class="small">No self approval + post-deploy test</div></div>
+</div>
+
+<div class="good"><b>Build once, promote unchanged.</b> Role definitions stay identical across environments; only workspace, report and semantic-model IDs vary.</div>
+</section>
+
+<section id="runtime" class="panel">
+<h2>Runtime RLS Flow</h2>
+<div class="flow">
+  <div class="step"><b>User signs in</b><br/>Microsoft Entra ID</div>
+  <div class="sep">→</div>
+  <div class="step"><b>Power BI semantic model</b><br/><code>USERPRINCIPALNAME()</code></div>
+  <div class="sep">→</div>
+  <div class="step"><b>RLS role</b><br/>Centrally governed policy</div>
+  <div class="sep">→</div>
+  <div class="step"><b>Databricks entitlement</b><br/>User → authorized dimensions</div>
+  <div class="sep">→</div>
+  <div class="step"><b>Authorized rows</b><br/>Security filter propagation</div>
+</div>
+
+<div class="warn"><b>Reports are consumers of the secured semantic model.</b> The control plane never modifies report definitions.</div>
+<div class="note"><b>Multiple reports:</b> if several reports use the same semantic model, list all expected report IDs or define one as the primary governed report and optionally validate all discovered reports bound to that semantic model.</div>
+</section>
+
+</div>
+<script>
+function show(id,b){
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.getElementById(id).classList.add('active'); b.classList.add('active');
+}
+</script>
+</body>
+</html>
